@@ -1,68 +1,93 @@
-import express from "express";
-import session from "express-session";
-import { google } from "googleapis";
-import dotenv from "dotenv";
+import express from 'express';
+import dotenv from 'dotenv';
+import { google } from 'googleapis';
+import { upsertUserToken, getUserToken } from './src/google.js';
 
 dotenv.config();
+
 const app = express();
+app.use(express.json());
 
-// Session middleware
-app.use(session({
-  secret: process.env.SESSION_SECRET,
-  resave: false,
-  saveUninitialized: true
-}));
+/**
+ * Health check endpoint
+ */
+app.get('/healthz', (req, res) => {
+  res.send('OK');
+});
 
-// Google OAuth2 client
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI
-);
+/**
+ * Start OAuth2 flow
+ */
+app.get('/auth', (req, res) => {
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.OAUTH_REDIRECT_URI
+  );
 
-// Start OAuth login
-app.get("/auth/google", (req, res) => {
-  const scopes = [
-    "https://www.googleapis.com/auth/calendar.readonly"
-  ];
+  const scopes = process.env.GOOGLE_SCOPES.split(' ');
+
   const url = oauth2Client.generateAuthUrl({
-    access_type: "offline",
-    scope: scopes
+    access_type: 'offline',
+    scope: scopes,
+    prompt: 'consent'
   });
+
   res.redirect(url);
 });
 
-// OAuth callback
-app.get("/oauth2callback", async (req, res) => {
+/**
+ * OAuth2 callback
+ */
+app.get('/oauth2callback', async (req, res) => {
   const code = req.query.code;
+
+  if (!code) {
+    return res.status(400).send('Missing code');
+  }
+
   try {
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.OAUTH_REDIRECT_URI
+    );
+
     const { tokens } = await oauth2Client.getToken(code);
-    oauth2Client.setCredentials(tokens);
-    req.session.tokens = tokens;
-    res.send("Authentication successful! You can close this tab.");
+    // Save tokens to DB (replace 'defaultUser' with your real user ID or auth context)
+    await upsertUserToken('defaultUser', tokens);
+
+    res.send('Google Calendar connected successfully! You can close this window.');
   } catch (err) {
-    console.error("Error retrieving access token", err);
-    res.status(500).send("Authentication failed");
+    console.error(err);
+    res.status(500).send('Error retrieving access token');
   }
 });
 
-// Example protected route
-app.get("/calendar-events", async (req, res) => {
-  if (!req.session.tokens) {
-    return res.redirect("/auth/google");
-  }
+/**
+ * Example Calendar endpoint
+ */
+app.get('/api/calendar/list', async (req, res) => {
+  try {
+    const tokens = await getUserToken('defaultUser');
+    if (!tokens) {
+      return res.status(401).send('Not authorized. Please connect Google Calendar first.');
+    }
 
-  oauth2Client.setCredentials(req.session.tokens);
-  const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-  const events = await calendar.events.list({
-    calendarId: "primary",
-    timeMin: (new Date()).toISOString(),
-    maxResults: 5,
-    singleEvents: true,
-    orderBy: "startTime",
-  });
-  res.json(events.data.items);
-});
+    const oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.OAUTH_REDIRECT_URI
+    );
+    oauth2Client.setCredentials(tokens);
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Server running on port ${port}`));
+    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+    const events = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin: new Date().toISOString(),
+      maxResults: 10,
+      singleEvents: true,
+      orderBy: 'startTime'
+    });
+
+    res.json(events.data.items)
