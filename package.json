@@ -1,0 +1,27 @@
+{
+  "name": "scottos-mcp-calendar",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "google-auth-library": "^9.14.1",
+    "googleapis": "^131.0.0",
+    "pg": "^8.11.5",
+    "zod": "^3.23.8"
+  },
+  "description": "Remote MCP server exposing Google Calendar tools to a Custom GPT.",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
