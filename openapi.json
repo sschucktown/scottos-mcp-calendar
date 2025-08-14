@@ -1,12 +1,12 @@
 {
   "openapi": "3.1.0",
-  "info": { "title": "ScottOS Calendar API", "version": "1.0.0" },
+  "info": { "title": "ScottOS Calendar API", "version": "1.0.2" },
   "servers": [
     { "url": "https://scottos-mcp-calendar.onrender.com" }
   ],
   "components": {
     "securitySchemes": {
-      "apiKey": { "type": "apiKey", "in": "header", "name": "x-api-key" }
+      "bearerAuth": { "type": "http", "scheme": "bearer" }
     },
     "schemas": {
       "EventCreate": {
@@ -16,18 +16,35 @@
           "calendarId": { "type": "string", "default": "primary" },
           "summary": { "type": "string" },
           "description": { "type": "string" },
-          "start": { "type": "string", "description": "ISO datetime" },
-          "end": { "type": "string", "description": "ISO datetime" },
+          "start": { "type": "string", "description": "ISO datetime, e.g. 2025-08-14T10:00:00-04:00" },
+          "end": { "type": "string", "description": "ISO datetime, e.g. 2025-08-14T10:45:00-04:00" },
           "recurrence": {
             "type": "array",
             "items": { "type": "string" },
             "description": "RRULE strings, e.g. ['RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR']"
           }
-        }
+        },
+        "additionalProperties": false
+      },
+      "EventUpdate": {
+        "type": "object",
+        "description": "Any subset of fields to update on an event",
+        "properties": {
+          "summary": { "type": "string" },
+          "description": { "type": "string" },
+          "start": { "type": "string", "description": "ISO datetime" },
+          "end": { "type": "string", "description": "ISO datetime" },
+          "recurrence": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "RRULE strings"
+          }
+        },
+        "additionalProperties": false
       }
     }
   },
-  "security": [{ "apiKey": [] }],
+  "security": [{ "bearerAuth": [] }],
   "paths": {
     "/api/calendar/events": {
       "get": {
@@ -58,7 +75,9 @@
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object" } } }
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/EventUpdate" } }
+          }
         },
         "responses": { "200": { "description": "OK" } }
       },
