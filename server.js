@@ -1,93 +1,71 @@
-import express from 'express';
-import dotenv from 'dotenv';
-import { google } from 'googleapis';
-import { upsertUserToken, getUserToken } from './src/google.js';
+import express from "express";
+import session from "express-session";
+import passport from "passport";
+import { Strategy as GoogleStrategy } from "passport-google-oauth20";
+import dotenv from "dotenv";
 
 dotenv.config();
 
 const app = express();
-app.use(express.json());
 
-/**
- * Health check endpoint
- */
-app.get('/healthz', (req, res) => {
-  res.send('OK');
-});
+// Session setup
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "dev-secret", // Use env var in production
+    resave: false,
+    saveUninitialized: false,
+  })
+);
 
-/**
- * Start OAuth2 flow
- */
-app.get('/auth', (req, res) => {
-  const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    process.env.OAUTH_REDIRECT_URI
-  );
+app.use(passport.initialize());
+app.use(passport.session());
 
-  const scopes = process.env.GOOGLE_SCOPES.split(' ');
-
-  const url = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: scopes,
-    prompt: 'consent'
-  });
-
-  res.redirect(url);
-});
-
-/**
- * OAuth2 callback
- */
-app.get('/oauth2callback', async (req, res) => {
-  const code = req.query.code;
-
-  if (!code) {
-    return res.status(400).send('Missing code');
-  }
-
-  try {
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.OAUTH_REDIRECT_URI
-    );
-
-    const { tokens } = await oauth2Client.getToken(code);
-    // Save tokens to DB (replace 'defaultUser' with your real user ID or auth context)
-    await upsertUserToken('defaultUser', tokens);
-
-    res.send('Google Calendar connected successfully! You can close this window.');
-  } catch (err) {
-    console.error(err);
-    res.status(500).send('Error retrieving access token');
-  }
-});
-
-/**
- * Example Calendar endpoint
- */
-app.get('/api/calendar/list', async (req, res) => {
-  try {
-    const tokens = await getUserToken('defaultUser');
-    if (!tokens) {
-      return res.status(401).send('Not authorized. Please connect Google Calendar first.');
+// Passport config
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL: process.env.CALLBACK_URL || "/auth/google/callback",
+    },
+    (accessToken, refreshToken, profile, done) => {
+      return done(null, { profile, accessToken });
     }
+  )
+);
 
-    const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.OAUTH_REDIRECT_URI
-    );
-    oauth2Client.setCredentials(tokens);
+passport.serializeUser((user, done) => {
+  done(null, user);
+});
+passport.deserializeUser((user, done) => {
+  done(null, user);
+});
 
-    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-    const events = await calendar.events.list({
-      calendarId: 'primary',
-      timeMin: new Date().toISOString(),
-      maxResults: 10,
-      singleEvents: true,
-      orderBy: 'startTime'
-    });
+// Routes
+app.get("/", (req, res) => {
+  res.send("Server is running ✅");
+});
 
-    res.json(events.data.items)
+app.get("/auth/google",
+  passport.authenticate("google", { scope: ["profile", "email", "https://www.googleapis.com/auth/calendar"] })
+);
+
+app.get("/auth/google/callback",
+  passport.authenticate("google", { failureRedirect: "/" }),
+  (req, res) => {
+    res.send("Logged in with Google ✅");
+  }
+);
+
+// Example protected route
+app.get("/calendar", (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.status(401).send("Unauthorized");
+  }
+  res.send("Your Google Calendar data would be here.");
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`✅ Server running on port ${PORT}`);
+});
