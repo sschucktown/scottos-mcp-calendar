@@ -14,8 +14,8 @@ async function readJSON() {
   try {
     const raw = await fs.readFile(TOKENS_PATH, 'utf8');
     return JSON.parse(raw);
-  } catch (e) {
-    return {}; // first run or missing file
+  } catch {
+    return {};
   }
 }
 
@@ -25,14 +25,13 @@ async function writeJSON(obj) {
 }
 
 export async function ensureTables() {
-  // no-op for file mode
   await fs.mkdir(DATA_DIR, { recursive: true });
   try { await fs.access(TOKENS_PATH); } catch { await writeJSON({}); }
 }
 
 export async function upsertUserToken(userId, tokens) {
   const all = await readJSON();
-  all[userId] = tokens;          // overwrite or create
+  all[userId] = tokens;
   await writeJSON(all);
   return true;
 }
