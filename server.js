@@ -39,6 +39,7 @@ app.get('/privacy.html', (_req, res) => {
   res.sendFile(path.join(__dirname, 'privacy.html'));
 });
 
+// helpful runtime check
 app.get('/debug-env', (_req, res) => {
   res.json({
     hasClientId: !!process.env.GOOGLE_CLIENT_ID,
@@ -48,6 +49,14 @@ app.get('/debug-env', (_req, res) => {
     scopes: process.env.GOOGLE_SCOPES || '(default)',
     hasActionsKey: !!process.env.ACTIONS_API_KEY
   });
+});
+
+// quick token status
+app.get('/auth/status', async (_req, res) => {
+  try {
+    const t = await getUserTokenById('default');
+    res.json({ hasTokens: !!t, keys: t ? Object.keys(t) : [] });
+  } catch (e) { res.status(500).json({ error: 'status_failed' }); }
 });
 
 // ---------- OAuth routes ----------
@@ -74,7 +83,7 @@ app.get('/oauth2callback', async (req, res) => {
     const { code } = req.query;
     if (!code) return res.status(400).send('Missing code');
     const { tokens } = await oauth2Client.getToken(code);
-    await upsertUserToken('default', tokens); // persist tokens (DB or file mode)
+    await upsertUserToken('default', tokens); // persist tokens (file-mode)
     res.send('✅ Google Calendar connected. You can close this window.');
   } catch (e) {
     console.error('OAuth callback error:', e);
@@ -87,7 +96,6 @@ function checkKey(req, res, next) {
   const expected = process.env.ACTIONS_API_KEY;
   if (!expected) return res.status(500).send('Server missing ACTIONS_API_KEY');
 
-  // Authorization: Bearer <key>  |  Basic apikey:<key>  |  x-api-key header  |  ?key=
   const auth = req.header('authorization') || '';
   const lower = auth.toLowerCase();
   let provided = null;
@@ -101,7 +109,6 @@ function checkKey(req, res, next) {
       provided = parts.length > 1 ? parts[1] : null;
     } catch {}
   }
-
   provided = provided || req.header('x-api-key') || req.query.key;
 
   if (provided !== expected) return res.status(401).send('Unauthorized');
@@ -111,7 +118,7 @@ function checkKey(req, res, next) {
 // ---------- Calendar REST endpoints ----------
 
 // READ events
-// Query params: calendarId (default 'primary'), timeMin (ISO), timeMax (ISO), maxResults (int)
+// Query: calendarId (default 'primary'), timeMin (ISO), timeMax (ISO), maxResults (int)
 app.get('/api/calendar/events', checkKey, async (req, res) => {
   try {
     const tokens = await getUserTokenById('default');
