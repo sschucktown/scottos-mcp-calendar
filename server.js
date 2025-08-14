@@ -1,4 +1,4 @@
-// server.js — ScottOS Calendar REST API for Custom GPT (no sessions, ESM)
+// server.js — ScottOS Calendar API (ESM, no sessions)
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -19,7 +19,7 @@ import {
   ensureTables
 } from './src/db.js';
 
-// ---- app bootstrap ----
+// ---------- App bootstrap ----------
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -28,7 +28,7 @@ const PORT = process.env.PORT || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ---- health & static ----
+// ---------- Health & static ----------
 app.get('/healthz', (_req, res) => res.send('ok'));
 
 app.get('/openapi.json', (_req, res) => {
@@ -39,7 +39,19 @@ app.get('/privacy.html', (_req, res) => {
   res.sendFile(path.join(__dirname, 'privacy.html'));
 });
 
-// ---- OAuth routes ----
+// (handy) show whether envs are present
+app.get('/debug-env', (_req, res) => {
+  res.json({
+    hasClientId: !!process.env.GOOGLE_CLIENT_ID,
+    hasClientSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+    oauthRedirectUri:
+      (process.env.OAUTH_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI) || '(missing)',
+    scopes: process.env.GOOGLE_SCOPES || '(default)',
+    hasActionsKey: !!process.env.ACTIONS_API_KEY
+  });
+});
+
+// ---------- OAuth routes ----------
 app.get('/auth', async (_req, res) => {
   try {
     const oauth2Client = getOAuthClient(); // reads GOOGLE_CLIENT_ID/SECRET + OAUTH_REDIRECT_URI
@@ -61,6 +73,7 @@ app.get('/oauth2callback', async (req, res) => {
   try {
     const oauth2Client = getOAuthClient();
     const { code } = req.query;
+    if (!code) return res.status(400).send('Missing code');
     const { tokens } = await oauth2Client.getToken(code);
     await upsertUserToken('default', tokens); // persist tokens (DB or file mode)
     res.send('✅ Google Calendar connected. You can close this window.');
@@ -70,19 +83,34 @@ app.get('/oauth2callback', async (req, res) => {
   }
 });
 
-// ---- API key middleware for GPT Actions ----
+// ---------- API key middleware (Bearer / Basic / x-api-key) ----------
 function checkKey(req, res, next) {
-  const key = req.header('x-api-key') || req.query.key;
-  if (!process.env.ACTIONS_API_KEY) {
-    return res.status(500).send('Server missing ACTIONS_API_KEY');
+  const expected = process.env.ACTIONS_API_KEY;
+  if (!expected) return res.status(500).send('Server missing ACTIONS_API_KEY');
+
+  // Header: Authorization: Bearer <key>
+  const auth = req.header('authorization') || '';
+  const lower = auth.toLowerCase();
+  let provided = null;
+
+  if (lower.startsWith('bearer ')) {
+    provided = auth.slice(7).trim();
+  } else if (lower.startsWith('basic ')) {
+    try {
+      const decoded = Buffer.from(auth.slice(6).trim(), 'base64').toString('utf8'); // "apikey:KEY"
+      const parts = decoded.split(':');
+      provided = parts.length > 1 ? parts[1] : null;
+    } catch { /* ignore */ }
   }
-  if (key !== process.env.ACTIONS_API_KEY) {
-    return res.status(401).send('Unauthorized');
-  }
+
+  // Fallback: x-api-key header or ?key= query
+  provided = provided || req.header('x-api-key') || req.query.key;
+
+  if (provided !== expected) return res.status(401).send('Unauthorized');
   next();
 }
 
-// ---- Calendar REST endpoints for GPT Actions ----
+// ---------- Calendar REST endpoints for GPT Actions ----------
 app.get('/api/calendar/events', checkKey, async (req, res) => {
   try {
     const tokens = await getUserTokenById('default');
@@ -165,7 +193,7 @@ app.delete('/api/calendar/events/:eventId', checkKey, async (req, res) => {
   }
 });
 
-// ---- start server ----
+// ---------- Start server ----------
 const start = async () => {
   try {
     await ensureTables(); // no-op in file-token mode; safe to call
