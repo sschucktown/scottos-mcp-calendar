@@ -39,7 +39,6 @@ app.get('/privacy.html', (_req, res) => {
   res.sendFile(path.join(__dirname, 'privacy.html'));
 });
 
-// (handy) show whether envs are present
 app.get('/debug-env', (_req, res) => {
   res.json({
     hasClientId: !!process.env.GOOGLE_CLIENT_ID,
@@ -54,7 +53,7 @@ app.get('/debug-env', (_req, res) => {
 // ---------- OAuth routes ----------
 app.get('/auth', async (_req, res) => {
   try {
-    const oauth2Client = getOAuthClient(); // reads GOOGLE_CLIENT_ID/SECRET + OAUTH_REDIRECT_URI
+    const oauth2Client = getOAuthClient(); // uses GOOGLE_CLIENT_ID/SECRET + OAUTH_REDIRECT_URI
     const url = oauth2Client.generateAuthUrl({
       access_type: 'offline',
       prompt: 'consent',
@@ -88,7 +87,7 @@ function checkKey(req, res, next) {
   const expected = process.env.ACTIONS_API_KEY;
   if (!expected) return res.status(500).send('Server missing ACTIONS_API_KEY');
 
-  // Header: Authorization: Bearer <key>
+  // Authorization: Bearer <key>  |  Basic apikey:<key>  |  x-api-key header  |  ?key=
   const auth = req.header('authorization') || '';
   const lower = auth.toLowerCase();
   let provided = null;
@@ -100,17 +99,19 @@ function checkKey(req, res, next) {
       const decoded = Buffer.from(auth.slice(6).trim(), 'base64').toString('utf8'); // "apikey:KEY"
       const parts = decoded.split(':');
       provided = parts.length > 1 ? parts[1] : null;
-    } catch { /* ignore */ }
+    } catch {}
   }
 
-  // Fallback: x-api-key header or ?key= query
   provided = provided || req.header('x-api-key') || req.query.key;
 
   if (provided !== expected) return res.status(401).send('Unauthorized');
   next();
 }
 
-// ---------- Calendar REST endpoints for GPT Actions ----------
+// ---------- Calendar REST endpoints ----------
+
+// READ events
+// Query params: calendarId (default 'primary'), timeMin (ISO), timeMax (ISO), maxResults (int)
 app.get('/api/calendar/events', checkKey, async (req, res) => {
   try {
     const tokens = await getUserTokenById('default');
@@ -134,6 +135,8 @@ app.get('/api/calendar/events', checkKey, async (req, res) => {
   }
 });
 
+// ADD event
+// Body: { calendarId?, summary, description?, start (ISO), end (ISO), recurrence? [] }
 app.post('/api/calendar/events', checkKey, async (req, res) => {
   try {
     const tokens = await getUserTokenById('default');
@@ -159,6 +162,7 @@ app.post('/api/calendar/events', checkKey, async (req, res) => {
   }
 });
 
+// UPDATE event (partial)
 app.patch('/api/calendar/events/:eventId', checkKey, async (req, res) => {
   try {
     const tokens = await getUserTokenById('default');
@@ -176,6 +180,7 @@ app.patch('/api/calendar/events/:eventId', checkKey, async (req, res) => {
   }
 });
 
+// DELETE event
 app.delete('/api/calendar/events/:eventId', checkKey, async (req, res) => {
   try {
     const tokens = await getUserTokenById('default');
